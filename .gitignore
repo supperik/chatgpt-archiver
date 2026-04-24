@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.playwright-profile/
+.selenium-profile/
+*.log
+/.remote-debug-profile/
+.idea/
+.vscode/
+archive/
+.tmp-tests/
+.tmp-archive/

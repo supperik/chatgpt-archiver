@@ -1,0 +1,32 @@
+{
+  "name": "archiver",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Network-based archiver that captures API responses and renders a local HTML archive.",
+  "type": "commonjs",
+  "bin": {
+    "archiver": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/cli.ts",
+    "install:browsers": "playwright install chromium",
+    "network:fetch": "tsx src/network/fetchCurlResponses.ts",
+    "network:import": "tsx src/network/importChatResponses.ts",
+    "network:run": "tsx src/network/fetchCurlResponses.ts --import",
+    "start": "node dist/cli.js",
+    "test": "npm run build && node --test --test-isolation=none dist/utils/fs.test.js dist/utils/html.test.js dist/discovery/urlPatterns.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "playwright": "^1.54.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3"
+  }
+}
