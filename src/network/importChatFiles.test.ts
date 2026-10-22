@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { FileManifest, FileManifestEntry, FileRef } from "../contracts";
 import { buildChatFileLinks, copyChatFiles } from "./importChatFiles";
-import { convertResponseToArtifacts } from "./importChatResponses";
+import { convertResponseToArtifacts, importFetchedChats } from "./importChatResponses";
 
 function ref(overrides: Partial<FileRef>): FileRef {
   return { key: "file_1", kind: "attachment", chatId: "c1", messageId: "m1", role: "user", ...overrides };
@@ -139,5 +139,43 @@ test("copyChatFiles copies files and reports missing sources", async () => {
     assert.deepEqual(await readdir(path.join(chatDir, "files")), ["a.png"]);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("importFetchedChats resolves filesDir from outDir", async () => {
+  const outDir = await mkdtemp(path.join(os.tmpdir(), "archiver-import-"));
+  try {
+    const payload = {
+      title: "Chat",
+      mapping: {
+        n1: {
+          id: "m1",
+          parent: null,
+          children: [],
+          message: {
+            id: "m1",
+            author: { role: "user" },
+            content: { content_type: "text", parts: ["hi"] },
+            metadata: { attachments: [{ id: "file_1", name: "a.pdf", mime_type: "application/pdf" }] },
+          },
+        },
+      },
+    };
+    const manifest = {
+      file_1: { key: "file_1", kind: "attachment", fileName: "a.pdf", status: "downloaded", localPath: "file_1/a.pdf", seenIn: [] },
+    };
+    await mkdir(path.join(outDir, "network", "chats"), { recursive: true });
+    await mkdir(path.join(outDir, "network", "files", "file_1"), { recursive: true });
+    await writeFile(path.join(outDir, "network", "chats", "c1.json"), JSON.stringify(payload));
+    await writeFile(path.join(outDir, "network", "files", "manifest.json"), JSON.stringify(manifest));
+    await writeFile(path.join(outDir, "network", "files", "file_1", "a.pdf"), "pdf");
+
+    await importFetchedChats({ outDir });
+
+    const attachments = JSON.parse(await readFile(path.join(outDir, "chats", "c1", "attachments.json"), "utf8"));
+    assert.equal(attachments[0].status, "downloaded");
+    assert.equal(await readFile(path.join(outDir, "chats", "c1", "files", "a.pdf"), "utf8"), "pdf");
+  } finally {
+    await rm(outDir, { recursive: true, force: true });
   }
 });

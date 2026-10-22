@@ -57,8 +57,7 @@ async function main(): Promise<void> {
   await importFetchedChats(options);
 }
 
-export function createDefaultImportOptions(): ImportOptions {
-  const outDir = path.resolve("archive");
+export function createDefaultImportOptions(outDir: string = path.resolve("archive")): ImportOptions {
   return {
     baseUrl: "https://chatgpt.com",
     outDir,
@@ -70,7 +69,7 @@ export function createDefaultImportOptions(): ImportOptions {
 
 export async function importFetchedChats(overrides: Partial<ImportOptions> = {}): Promise<void> {
   const options: ImportOptions = {
-    ...createDefaultImportOptions(),
+    ...createDefaultImportOptions(overrides.outDir ?? path.resolve("archive")),
     ...overrides,
   };
   const storage = new ArchiveStorage(options.outDir);
