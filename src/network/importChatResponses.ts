@@ -100,6 +100,10 @@ export async function importFetchedChats(overrides: Partial<ImportOptions> = {})
     const payload = await readJsonFile<unknown>(filePath);
     const fileChatId = path.basename(filePath, path.extname(filePath));
     const artifacts = convertResponseToArtifacts(payload, fileChatId, targets, options.baseUrl, manifest);
+    if (!artifacts) {
+      console.warn(`[warn] Skipped ${fileChatId}: no messages`);
+      continue;
+    }
     const missingPaths = new Set(
       await copyChatFiles(artifacts.copies, options.filesDir, storage.getChatDir(artifacts.chat.chatId)),
     );
@@ -196,7 +200,7 @@ export function convertResponseToArtifacts(
   targets: Map<string, ChatTarget>,
   baseUrl: string,
   manifest: FileManifest,
-): StoredChatArtifacts & { copies: ChatFileLinks["copies"] } {
+): (StoredChatArtifacts & { copies: ChatFileLinks["copies"] }) | null {
   const chatId = resolveChatId(payload, fileChatId);
   const target = targets.get(chatId);
   const responseTitle = pickMetadataString(payload, "title", "conversation_title");
@@ -237,7 +241,7 @@ export function convertResponseToArtifacts(
   }));
 
   if (messages.length === 0) {
-    throw new Error(`No user/assistant messages with non-empty content found for ${chatId}`);
+    return null;
   }
 
   return {

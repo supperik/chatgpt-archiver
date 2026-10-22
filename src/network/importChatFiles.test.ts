@@ -103,9 +103,18 @@ test("convertResponseToArtifacts keeps file-bearing messages", () => {
     },
   };
   const result = convertResponseToArtifacts(payload, "c1", new Map(), "https://chatgpt.com", {});
+  assert.ok(result);
   assert.deepEqual(result.messages.map((message) => message.role), ["user", "tool"]);
   assert.ok(result.messages.every((message) => message.attachmentRefs.length > 0));
   assert.equal(result.attachments.length, 2);
+});
+
+test("convertResponseToArtifacts returns null for an empty chat", () => {
+  const payload = {
+    title: "New chat",
+    mapping: { root: { id: "root", parent: null, children: [], message: null } },
+  };
+  assert.equal(convertResponseToArtifacts(payload, "c1", new Map(), "https://chatgpt.com", {}), null);
 });
 
 test("copyChatFiles copies files and reports missing sources", async () => {
