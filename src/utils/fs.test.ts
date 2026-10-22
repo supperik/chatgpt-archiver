@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatBytes, sanitizeFileName, toSafeFileName, uniqueFileName } from "./fs";
+import { formatBytes, sanitizeFileName, toSafeFileName } from "./fs";
 
 test("sanitizeFileName removes reserved characters", () => {
   assert.equal(sanitizeFileName('inv:alid*name?.txt'), "inv_alid_name_.txt");
@@ -47,11 +47,4 @@ test("formatBytes uses base 1024", () => {
   assert.equal(formatBytes(512), "512 B");
   assert.equal(formatBytes(2048), "2.0 KB");
   assert.equal(formatBytes(4201864), "4.0 MB");
-});
-
-test("uniqueFileName resolves collisions case-insensitively", () => {
-  const taken = new Set<string>();
-  assert.equal(uniqueFileName("a.png", taken), "a.png");
-  assert.equal(uniqueFileName("a.png", taken), "a (2).png");
-  assert.equal(uniqueFileName("A.PNG", taken), "A (3).PNG");
 });

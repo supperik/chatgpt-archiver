@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathExists } from "../utils/fs";
 import type { FileManifest, FileManifestEntry, FileRef } from "../contracts";
-import { buildChatFileLinks, copyChatFiles } from "./importChatFiles";
+import { buildChatFileLinks } from "./importChatFiles";
 import { convertResponseToArtifacts, importFetchedChats } from "./importChatResponses";
+
+const PREFIX = "../../network/files";
 
 function ref(overrides: Partial<FileRef>): FileRef {
   return { key: "file_1", kind: "attachment", chatId: "c1", messageId: "m1", role: "user", ...overrides };
@@ -19,12 +22,11 @@ test("buildChatFileLinks links a downloaded user image", () => {
   const manifest: FileManifest = {
     file_1: entry({ fileName: "20261021_145816.jpg", localPath: "file_1/20261021_145816.jpg" }),
   };
-  const links = buildChatFileLinks("c1", [ref({ fileName: "x.jpg" })], manifest);
+  const links = buildChatFileLinks("c1", [ref({ fileName: "x.jpg" })], manifest, PREFIX);
   assert.equal(links.attachments.length, 1);
   assert.equal(links.attachments[0]?.status, "downloaded");
   assert.equal(links.attachments[0]?.messageId, "m1");
-  assert.equal(links.attachments[0]?.localPath, "files/20261021_145816.jpg");
-  assert.deepEqual(links.copies, [{ from: "file_1/20261021_145816.jpg", to: "files/20261021_145816.jpg" }]);
+  assert.equal(links.attachments[0]?.localPath, "../../network/files/file_1/20261021_145816.jpg");
 });
 
 test("buildChatFileLinks dedups a key across parts and messages", () => {
@@ -33,6 +35,7 @@ test("buildChatFileLinks dedups a key across parts and messages", () => {
     "c1",
     [ref({}), ref({ kind: "image" }), ref({ messageId: "m3" })],
     manifest,
+    PREFIX,
   );
   assert.equal(links.attachments.length, 1);
   assert.equal(links.attachments[0]?.messageId, "m1");
@@ -41,24 +44,24 @@ test("buildChatFileLinks dedups a key across parts and messages", () => {
 });
 
 test("buildChatFileLinks leaves system refs without a message", () => {
-  const links = buildChatFileLinks("c1", [ref({ role: "system" })], { file_1: entry({}) });
+  const links = buildChatFileLinks("c1", [ref({ role: "system" })], { file_1: entry({}) }, PREFIX);
   assert.equal(links.attachments[0]?.messageId, undefined);
 });
 
-test("buildChatFileLinks makes local names unique", () => {
+test("buildChatFileLinks keeps each key directory for equal file names", () => {
   const manifest: FileManifest = {
     file_1: entry({ fileName: "scan.png", localPath: "file_1/scan.png" }),
     file_2: entry({ key: "file_2", fileName: "scan.png", localPath: "file_2/scan.png" }),
   };
-  const links = buildChatFileLinks("c1", [ref({}), ref({ key: "file_2" })], manifest);
-  assert.deepEqual(links.attachments.map((item) => item.localPath), ["files/scan.png", "files/scan (2).png"]);
+  const links = buildChatFileLinks("c1", [ref({}), ref({ key: "file_2" })], manifest, PREFIX);
+  assert.deepEqual(links.attachments.map((item) => item.localPath), [`${PREFIX}/file_1/scan.png`, `${PREFIX}/file_2/scan.png`]);
 });
 
 test("buildChatFileLinks marks keys absent from manifest as missing", () => {
-  const links = buildChatFileLinks("c1", [ref({ fileName: "a.png" })], {});
+  const links = buildChatFileLinks("c1", [ref({ fileName: "a.png" })], {}, PREFIX);
   assert.equal(links.attachments[0]?.status, "missing");
   assert.equal(links.attachments[0]?.error, "not in manifest");
-  assert.deepEqual(links.copies, []);
+  assert.equal(links.attachments[0]?.localPath, "");
 });
 
 test("buildChatFileLinks sets sourceUrl for sandbox refs", () => {
@@ -67,6 +70,7 @@ test("buildChatFileLinks sets sourceUrl for sandbox refs", () => {
     "c1",
     [ref({ key, kind: "sandbox", role: "assistant", fileName: "Попов.zip", sandboxPath: "/mnt/data/Попов.zip" })],
     {},
+    PREFIX,
   );
   assert.equal(links.attachments[0]?.sourceUrl, "sandbox:/mnt/data/Попов.zip");
 });
@@ -102,7 +106,7 @@ test("convertResponseToArtifacts keeps file-bearing messages", () => {
       },
     },
   };
-  const result = convertResponseToArtifacts(payload, "c1", new Map(), "https://chatgpt.com", {});
+  const result = convertResponseToArtifacts(payload, "c1", new Map(), "https://chatgpt.com", {}, PREFIX);
   assert.ok(result);
   assert.deepEqual(result.messages.map((message) => message.role), ["user", "tool"]);
   assert.ok(result.messages.every((message) => message.attachmentRefs.length > 0));
@@ -114,67 +118,66 @@ test("convertResponseToArtifacts returns null for an empty chat", () => {
     title: "New chat",
     mapping: { root: { id: "root", parent: null, children: [], message: null } },
   };
-  assert.equal(convertResponseToArtifacts(payload, "c1", new Map(), "https://chatgpt.com", {}), null);
+  assert.equal(convertResponseToArtifacts(payload, "c1", new Map(), "https://chatgpt.com", {}, PREFIX), null);
 });
 
-test("copyChatFiles copies files and reports missing sources", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "archiver-import-"));
-  try {
-    const filesRoot = path.join(root, "files");
-    const chatDir = path.join(root, "chat");
-    await mkdir(path.join(filesRoot, "file_1"), { recursive: true });
-    await writeFile(path.join(filesRoot, "file_1", "a.png"), "data");
-
-    const missing = await copyChatFiles(
-      [
-        { from: "file_1/a.png", to: "files/a.png" },
-        { from: "file_2/b.png", to: "files/b.png" },
-      ],
-      filesRoot,
-      chatDir,
-    );
-
-    assert.deepEqual(missing, ["files/b.png"]);
-    assert.equal(await readFile(path.join(chatDir, "files", "a.png"), "utf8"), "data");
-    assert.deepEqual(await readdir(path.join(chatDir, "files")), ["a.png"]);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("importFetchedChats resolves filesDir from outDir", async () => {
-  const outDir = await mkdtemp(path.join(os.tmpdir(), "archiver-import-"));
-  try {
-    const payload = {
-      title: "Chat",
-      mapping: {
-        n1: {
+async function setupImport(outDir: string): Promise<void> {
+  const payload = {
+    title: "Chat",
+    mapping: {
+      n1: {
+        id: "m1",
+        parent: null,
+        children: [],
+        message: {
           id: "m1",
-          parent: null,
-          children: [],
-          message: {
-            id: "m1",
-            author: { role: "user" },
-            content: { content_type: "text", parts: ["hi"] },
-            metadata: { attachments: [{ id: "file_1", name: "a.pdf", mime_type: "application/pdf" }] },
-          },
+          author: { role: "user" },
+          content: { content_type: "text", parts: ["hi"] },
+          metadata: { attachments: [{ id: "file_1", name: "a.pdf", mime_type: "application/pdf" }] },
         },
       },
-    };
-    const manifest = {
-      file_1: { key: "file_1", kind: "attachment", fileName: "a.pdf", status: "downloaded", localPath: "file_1/a.pdf", seenIn: [] },
-    };
-    await mkdir(path.join(outDir, "network", "chats"), { recursive: true });
-    await mkdir(path.join(outDir, "network", "files", "file_1"), { recursive: true });
-    await writeFile(path.join(outDir, "network", "chats", "c1.json"), JSON.stringify(payload));
-    await writeFile(path.join(outDir, "network", "files", "manifest.json"), JSON.stringify(manifest));
-    await writeFile(path.join(outDir, "network", "files", "file_1", "a.pdf"), "pdf");
+    },
+  };
+  const manifest = {
+    file_1: { key: "file_1", kind: "attachment", fileName: "a.pdf", status: "downloaded", localPath: "file_1/a.pdf", seenIn: [] },
+  };
+  await mkdir(path.join(outDir, "network", "chats"), { recursive: true });
+  await mkdir(path.join(outDir, "network", "files", "file_1"), { recursive: true });
+  await writeFile(path.join(outDir, "network", "chats", "c1.json"), JSON.stringify(payload));
+  await writeFile(path.join(outDir, "network", "files", "manifest.json"), JSON.stringify(manifest));
+  await writeFile(path.join(outDir, "network", "files", "file_1", "a.pdf"), "pdf");
+}
+
+test("importFetchedChats links the shared store and drops stale copies", async () => {
+  const outDir = await mkdtemp(path.join(os.tmpdir(), "archiver-import-"));
+  try {
+    await setupImport(outDir);
+    await mkdir(path.join(outDir, "chats", "c1", "files"), { recursive: true });
+    await writeFile(path.join(outDir, "chats", "c1", "files", "old.txt"), "old");
 
     await importFetchedChats({ outDir });
 
     const attachments = JSON.parse(await readFile(path.join(outDir, "chats", "c1", "attachments.json"), "utf8"));
     assert.equal(attachments[0].status, "downloaded");
-    assert.equal(await readFile(path.join(outDir, "chats", "c1", "files", "a.pdf"), "utf8"), "pdf");
+    assert.equal(attachments[0].localPath, "../../network/files/file_1/a.pdf");
+    assert.equal(await pathExists(path.join(outDir, "chats", "c1", "files")), false);
+    assert.equal(await readFile(path.join(outDir, "network", "files", "file_1", "a.pdf"), "utf8"), "pdf");
+  } finally {
+    await rm(outDir, { recursive: true, force: true });
+  }
+});
+
+test("importFetchedChats marks a downloaded file absent from disk as missing", async () => {
+  const outDir = await mkdtemp(path.join(os.tmpdir(), "archiver-import-"));
+  try {
+    await setupImport(outDir);
+    await rm(path.join(outDir, "network", "files", "file_1", "a.pdf"));
+
+    await importFetchedChats({ outDir });
+
+    const attachments = JSON.parse(await readFile(path.join(outDir, "chats", "c1", "attachments.json"), "utf8"));
+    assert.equal(attachments[0].status, "missing");
+    assert.equal(attachments[0].error, "local file missing");
   } finally {
     await rm(outDir, { recursive: true, force: true });
   }

@@ -54,7 +54,6 @@ export class ArchiveStorage implements StorageWriter {
   async writeChatArtifacts(artifacts: StoredChatArtifacts): Promise<void> {
     const chatDir = this.getChatDir(artifacts.chat.chatId);
     await ensureDir(chatDir);
-    await ensureDir(this.getChatFilesDir(artifacts.chat.chatId));
 
     await Promise.all([
       writeJsonFile(path.join(chatDir, "chat.json"), artifacts.chat),
@@ -91,10 +90,6 @@ export class ArchiveStorage implements StorageWriter {
 
   getChatDir(chatId: string): string {
     return path.join(this.paths.chatsDir, chatId);
-  }
-
-  getChatFilesDir(chatId: string): string {
-    return path.join(this.getChatDir(chatId), "files");
   }
 
   get manifestPath(): string {

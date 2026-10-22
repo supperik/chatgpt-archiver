@@ -77,31 +77,31 @@ function makeAttachment(overrides: Partial<AttachmentRecord>): AttachmentRecord 
     chatId: "c1",
     messageId: "m1",
     fileName: "a.png",
-    localPath: "files/a.png",
+    localPath: "../../network/files/file_1/a.png",
     status: "downloaded",
     ...overrides
   };
 }
 
 test("rewriteSandboxLinks maps raw and encoded links and leaves others", () => {
-  const links = new Map([["sandbox:/mnt/data/П.zip", "./files/%D0%9F.zip"]]);
-  assert.equal(rewriteSandboxLinks("[z](sandbox:/mnt/data/%D0%9F.zip)", links), "[z](./files/%D0%9F.zip)");
-  assert.equal(rewriteSandboxLinks("[z](sandbox:/mnt/data/П.zip)", links), "[z](./files/%D0%9F.zip)");
+  const links = new Map([["sandbox:/mnt/data/П.zip", "../../network/files/file_1/%D0%9F.zip"]]);
+  assert.equal(rewriteSandboxLinks("[z](sandbox:/mnt/data/%D0%9F.zip)", links), "[z](../../network/files/file_1/%D0%9F.zip)");
+  assert.equal(rewriteSandboxLinks("[z](sandbox:/mnt/data/П.zip)", links), "[z](../../network/files/file_1/%D0%9F.zip)");
   assert.equal(rewriteSandboxLinks("[z](sandbox:/mnt/data/other.zip)", links), "[z](sandbox:/mnt/data/other.zip)");
 });
 
 test("renders a downloaded image inline", async () => {
   const html = await renderChatHtml(artifactsWithAll(
     [makeMessage({ role: "user", plainText: "hi" })],
-    [makeAttachment({ mimeType: "image/png", localPath: "files/a b.png" })]
+    [makeAttachment({ mimeType: "image/png", localPath: "../../network/files/file_1/a b.png" })]
   ));
-  assert.match(html, /<img src="\.\/files\/a%20b\.png"/);
+  assert.match(html, /<img src="\.\.\/\.\.\/network\/files\/file_1\/a%20b\.png"/);
 });
 
 test("renders a pdf card with size and type", async () => {
   const html = await renderChatHtml(artifactsWithAll(
     [makeMessage({ role: "user", plainText: "hi" })],
-    [makeAttachment({ fileName: "r.pdf", localPath: "files/r.pdf", mimeType: "application/pdf", sizeBytes: 4201864 })]
+    [makeAttachment({ fileName: "r.pdf", localPath: "../../network/files/file_1/r.pdf", mimeType: "application/pdf", sizeBytes: 4201864 })]
   ));
   assert.match(html, /4\.0 MB · application\/pdf/);
   assert.match(html, /Open local copy/);
@@ -113,13 +113,13 @@ test("renders a placeholder for missing files", async () => {
     [makeAttachment({ status: "missing" })]
   ));
   assert.match(html, /Unavailable on server/);
-  assert.doesNotMatch(html, /href="\.\/files\//);
+  assert.doesNotMatch(html, /href="\.\.\/\.\.\/network\/files\//);
 });
 
 test("renders project files in the header", async () => {
   const html = await renderChatHtml(artifactsWithAll(
     [makeMessage({ role: "user", plainText: "hi" })],
-    [makeAttachment({ messageId: undefined, fileName: "spec.txt", localPath: "files/spec.txt" })]
+    [makeAttachment({ messageId: undefined, fileName: "spec.txt", localPath: "../../network/files/file_1/spec.txt" })]
   ));
   const headerIndex = html.indexOf("<h2>Project files</h2>");
   assert.ok(headerIndex >= 0);
@@ -146,17 +146,17 @@ test("attaches generated images to the assistant turn", async () => {
 test("rewrites downloaded sandbox links", async () => {
   const html = await renderChatHtml(artifactsWithAll(
     [makeMessage({ plainText: "[zip](sandbox:/mnt/data/x.zip)" })],
-    [makeAttachment({ messageId: "m1", fileName: "x.zip", localPath: "files/x.zip", sourceUrl: "sandbox:/mnt/data/x.zip" })]
+    [makeAttachment({ messageId: "m1", fileName: "x.zip", localPath: "../../network/files/file_1/x.zip", sourceUrl: "sandbox:/mnt/data/x.zip" })]
   ));
-  assert.match(html, /href="\.\/files\/x\.zip"/);
+  assert.match(html, /href="\.\.\/\.\.\/network\/files\/file_1\/x\.zip"/);
 });
 
 test("rewrites sandbox links to files with parentheses", async () => {
   const html = await renderChatHtml(artifactsWithAll(
     [makeMessage({ plainText: "[zip](sandbox:/mnt/data/x.zip)" })],
-    [makeAttachment({ messageId: "m1", fileName: "x (2).zip", localPath: "files/x (2).zip", sourceUrl: "sandbox:/mnt/data/x.zip" })]
+    [makeAttachment({ messageId: "m1", fileName: "x (2).zip", localPath: "../../network/files/file_1/x (2).zip", sourceUrl: "sandbox:/mnt/data/x.zip" })]
   ));
-  assert.match(html, /href="\.\/files\/x%20%282%29\.zip"/);
+  assert.match(html, /href="\.\.\/\.\.\/network\/files\/file_1\/x%20%282%29\.zip"/);
 });
 
 test("escapes attachment file names", async () => {

@@ -22,7 +22,8 @@ test("plainTextToHtml renders inline markdown safely", () => {
   assert.match(value, /<a href="https:\/\/example\.com">link<\/a>/);
 });
 
-test("plainTextToHtml allows local ./files/ links but not sandbox links", () => {
-  assert.match(plainTextToHtml("[a](./files/x.zip)"), /href="\.\/files\/x\.zip"/);
+test("plainTextToHtml allows shared-store links but not sandbox links", () => {
+  assert.match(plainTextToHtml("[a](../../network/files/f/x.zip)"), /href="\.\.\/\.\.\/network\/files\/f\/x\.zip"/);
+  assert.match(plainTextToHtml("[a](../other/x.zip)"), /href="#"/);
   assert.match(plainTextToHtml("[a](sandbox:/mnt/data/x)"), /href="#"/);
 });

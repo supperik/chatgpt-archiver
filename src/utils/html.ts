@@ -283,7 +283,7 @@ function renderInline(text: string): string {
 
 function sanitizeUrl(value: string): string {
   const trimmed = value.trim();
-  if (/^(https?:\/\/|mailto:)/i.test(trimmed) || trimmed.startsWith("./files/")) {
+  if (/^(https?:\/\/|mailto:)/i.test(trimmed) || trimmed.startsWith("../../network/files/")) {
     return trimmed;
   }
   return "#";

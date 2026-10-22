@@ -1,13 +1,13 @@
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import type { ArchiveManifest, ChatIndexEntry, FileManifest, MessageRecord, StoredChatArtifacts } from "../contracts";
 import { getChatIdFromUrl, getProjectNameFromProjectId, resolveProjectMetadata } from "../discovery/urlPatterns";
-import { buildChatFileLinks, copyChatFiles, type ChatFileLinks } from "./importChatFiles";
+import { buildChatFileLinks } from "./importChatFiles";
 import { readFileManifest } from "./fileDownloads";
 import { extractFileRefs } from "./fileRefs";
 import { StaticArchiveRenderer } from "../renderer/render";
 import { ArchiveStorage } from "../storage/archiveStorage";
-import { readJsonFile, readJsonFileIfExists } from "../utils/fs";
+import { pathExists, readJsonFile, readJsonFileIfExists } from "../utils/fs";
 import { shortHash } from "../utils/hash";
 
 export interface ImportOptions {
@@ -98,21 +98,21 @@ export async function importFetchedChats(overrides: Partial<ImportOptions> = {})
   for (const filePath of files) {
     const payload = await readJsonFile<unknown>(filePath);
     const fileChatId = path.basename(filePath, path.extname(filePath));
-    const artifacts = convertResponseToArtifacts(payload, fileChatId, targets, options.baseUrl, manifest);
+    const chatDir = storage.getChatDir(resolveChatId(payload, fileChatId));
+    const filesPrefix = path.relative(chatDir, options.filesDir).split(path.sep).join("/");
+    const artifacts = convertResponseToArtifacts(payload, fileChatId, targets, options.baseUrl, manifest, filesPrefix);
     if (!artifacts) {
       console.warn(`[warn] Skipped ${fileChatId}: no messages`);
       continue;
     }
-    const missingPaths = new Set(
-      await copyChatFiles(artifacts.copies, options.filesDir, storage.getChatDir(artifacts.chat.chatId)),
-    );
     for (const attachment of artifacts.attachments) {
-      if (missingPaths.has(attachment.localPath)) {
+      if (attachment.status === "downloaded" && !(await pathExists(path.join(chatDir, ...attachment.localPath.split("/"))))) {
         attachment.status = "missing";
         attachment.error = "local file missing";
       }
     }
 
+    await rm(path.join(chatDir, "files"), { recursive: true, force: true });
     await storage.writeChatArtifacts(artifacts);
     await renderer.renderChat(artifacts);
 
@@ -199,7 +199,8 @@ export function convertResponseToArtifacts(
   targets: Map<string, ChatTarget>,
   baseUrl: string,
   manifest: FileManifest,
-): (StoredChatArtifacts & { copies: ChatFileLinks["copies"] }) | null {
+  filesPrefix: string,
+): StoredChatArtifacts | null {
   const chatId = resolveChatId(payload, fileChatId);
   const target = targets.get(chatId);
   const responseTitle = pickMetadataString(payload, "title", "conversation_title");
@@ -211,7 +212,7 @@ export function convertResponseToArtifacts(
     ?? buildChatUrl(baseUrl, chatId, projectId);
   const title = chooseBetterTitle(responseTitle ?? target?.title ?? `Chat ${chatId}`, `Chat ${chatId}`);
 
-  const links = buildChatFileLinks(chatId, extractFileRefs(payload, chatId), manifest);
+  const links = buildChatFileLinks(chatId, extractFileRefs(payload, chatId), manifest, filesPrefix);
   const nodes = normalizeNodes(extractMessageNodes(payload)).map((node) => ({
     ...node,
     keep: node.keep || (node.role !== "system" && links.refsByMessageId.has(node.fileRefId)),
@@ -255,7 +256,6 @@ export function convertResponseToArtifacts(
     },
     messages,
     attachments: links.attachments,
-    copies: links.copies,
   };
 }
 

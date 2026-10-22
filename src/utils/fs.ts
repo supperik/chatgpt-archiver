@@ -93,17 +93,6 @@ export function formatBytes(sizeBytes: number): string {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function uniqueFileName(name: string, taken: Set<string>): string {
-  const ext = path.extname(name);
-  const stem = name.slice(0, name.length - ext.length);
-  let candidate = name;
-  for (let counter = 2; taken.has(candidate.toLowerCase()); counter += 1) {
-    candidate = `${stem} (${counter})${ext}`;
-  }
-  taken.add(candidate.toLowerCase());
-  return candidate;
-}
-
 export async function listSubdirectories(dirPath: string): Promise<string[]> {
   const entries = await readdir(dirPath, { withFileTypes: true });
   return entries

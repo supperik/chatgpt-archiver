@@ -19,6 +19,8 @@ The project no longer parses the rendered DOM. The only supported pipeline is:
 - manifest: `archive/network/files/manifest.json`
 - rendered archive: `archive/index.html` and `archive/chats/<chat-id>/chat.html`
 
+`chat.html` links to the files in `archive/network/files`, so keep or move the whole archive folder (including `network/`) together.
+
 ## Install
 
 ```powershell
