@@ -1,12 +1,4 @@
-export const REQUIRED_CAPTURE_HEADERS = [
-  "authorization",
-  "chatgpt-account-id",
-  "oai-client-build-number",
-  "oai-client-version",
-  "oai-device-id",
-  "oai-language",
-  "oai-session-id",
-] as const;
+export const REQUIRED_CAPTURE_HEADERS = ["authorization"] as const;
 
 export const CAPTURE_SOURCE_PATHS = [
   "/backend-api/conversations",

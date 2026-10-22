@@ -281,6 +281,10 @@ function parseBrowserFlavor(value: string): BrowserFlavor {
   }
 }
 
+export function findMissingCaptureHeaders(headers: Record<string, string>): string[] {
+  return REQUIRED_CAPTURE_HEADERS.filter((name) => !headers[name]);
+}
+
 async function captureApiHeaders(session: BrowserSession, logger: Logger): Promise<CapturedHeaders> {
   logger.info("Capturing request headers from the authorized ChatGPT session");
 
@@ -305,7 +309,7 @@ async function captureApiHeaders(session: BrowserSession, logger: Logger): Promi
         ...(cookieHeader ? { cookie: cookieHeader } : {}),
       });
 
-      const missing = REQUIRED_CAPTURE_HEADERS.filter((name) => !sanitized[name]);
+      const missing = findMissingCaptureHeaders(sanitized);
       if (missing.length > 0) {
         throw new Error(`Captured request is missing headers: ${missing.join(", ")}`);
       }
