@@ -61,6 +61,23 @@ export interface FileRef {
   generated?: boolean;
 }
 
+export interface FileManifestEntry {
+  key: string;
+  kind: FileRefKind;
+  fileName: string;
+  localPath?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  sha256?: string;
+  status: AttachmentStatus;
+  error?: string;
+  httpStatus?: number;
+  downloadedAt?: string;
+  seenIn: Array<{ chatId: string; messageId: string }>;
+}
+
+export type FileManifest = Record<string, FileManifestEntry>;
+
 export interface MessageRecord {
   messageId: string;
   chatId: string;
