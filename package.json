@@ -16,7 +16,7 @@
     "network:import": "tsx src/network/importChatResponses.ts",
     "network:run": "tsx src/network/fetchCurlResponses.ts --import",
     "start": "node dist/cli.js",
-    "test": "npm run build && node --test --test-isolation=none dist/utils/fs.test.js dist/utils/html.test.js dist/discovery/urlPatterns.test.js dist/renderer/render.test.js dist/network/fileRefs.test.js dist/network/fileDownloads.test.js dist/network/importChatFiles.test.js dist/network/fetchCurlResponses.test.js"
+    "test": "npm run build && node --test --test-isolation=none dist/utils/fs.test.js dist/utils/html.test.js dist/discovery/urlPatterns.test.js dist/export/chatMarkdown.test.js dist/renderer/render.test.js dist/network/fileRefs.test.js dist/network/fileDownloads.test.js dist/network/importChatFiles.test.js dist/network/fetchCurlResponses.test.js"
   },
   "engines": {
     "node": ">=22"

@@ -167,3 +167,68 @@ test("escapes attachment file names", async () => {
   assert.match(html, /&lt;b&gt;/);
   assert.doesNotMatch(html, /<b>x<\/b>/);
 });
+
+function readExportData(html: string): { fileName: string; markdownWithout: string; markdownWith?: string; files: Array<{ href: string; name: string }> } {
+  const match = html.match(/<script type="application\/json" id="chat-export-data">([\s\S]*?)<\/script>/);
+  assert.ok(match);
+  return JSON.parse(match[1] as string);
+}
+
+test("renders the download button with file count and size", async () => {
+  const html = await renderChatHtml(artifactsWithAll(
+    [makeMessage({ role: "user", plainText: "hi" })],
+    [
+      makeAttachment({ attachmentId: "a1", fileName: "a.pdf", localPath: "../../network/files/file_1/a.pdf", sizeBytes: 1048576 }),
+      makeAttachment({ attachmentId: "a2", fileName: "b.png", localPath: "../../network/files/file_2/b.png" }),
+      makeAttachment({ attachmentId: "a3", fileName: "c.png", status: "missing", sizeBytes: 999 })
+    ]
+  ));
+  assert.match(html, /<details class="chat-export" data-chat-export>/);
+  assert.match(html, /<summary>Download chat<\/summary>/);
+  assert.match(html, /<button type="button" data-export="without">Without files<\/button>/);
+  assert.match(html, /<button type="button" data-export="with">With files \(2 files, 1\.0 MB\)<\/button>/);
+  assert.match(html, /<script defer src="\.\.\/\.\.\/assets\/chat\.js"><\/script>/);
+  const data = readExportData(html);
+  assert.equal(data.fileName, "Test chat.md");
+  assert.ok(data.markdownWith);
+  assert.deepEqual(data.files, [
+    { href: "../../network/files/file_1/a.pdf", name: "a.pdf" },
+    { href: "../../network/files/file_2/b.png", name: "b.png" }
+  ]);
+});
+
+test("omits the With files button and markdownWith when nothing was downloaded", async () => {
+  const html = await renderChatHtml(artifactsWithAll(
+    [makeMessage({ role: "user", plainText: "hi" })],
+    [makeAttachment({ status: "failed" })]
+  ));
+  assert.match(html, /data-export="without"/);
+  assert.doesNotMatch(html, /data-export="with"/);
+  const data = readExportData(html);
+  assert.equal(data.markdownWith, undefined);
+  assert.deepEqual(data.files, []);
+});
+
+test("embedded export JSON survives </script> in message text", async () => {
+  const html = await renderChatHtml(artifactsWithAll(
+    [makeMessage({ role: "user", plainText: "x </script><b>y</b> \u2028 z" })],
+    []
+  ));
+  const body = html.slice(html.indexOf('id="chat-export-data"'));
+  assert.equal((body.match(/<\/script>/g) ?? []).length, 1);
+  assert.doesNotMatch(body, /\u2028/);
+  assert.match(readExportData(html).markdownWithout, /<\/script><b>y<\/b>/);
+});
+
+test("writeAssets writes chat.js", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "archiver-assets-"));
+  try {
+    const storage = new ArchiveStorage(dir);
+    await storage.ensureBaseStructure();
+    await new StaticArchiveRenderer(storage).writeAssets();
+    const script = await fs.readFile(path.join(storage.paths.assetsDir, "chat.js"), "utf8");
+    assert.match(script, /data-export/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

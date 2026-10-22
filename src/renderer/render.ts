@@ -9,7 +9,8 @@ import type {
 } from "../contracts";
 import { resolveProjectMetadata } from "../discovery/urlPatterns";
 import { plainTextToHtml, escapeHtml } from "../utils/html";
-import { formatBytes, writeTextFile } from "../utils/fs";
+import { formatBytes, toSafeFileName, writeTextFile } from "../utils/fs";
+import { buildChatMarkdown } from "../export/chatMarkdown";
 import { ArchiveStorage } from "../storage/archiveStorage";
 
 const SITE_CSS = `
@@ -361,6 +362,18 @@ a {
   margin-top: 1rem;
 }
 
+.chat-export {
+  margin-top: 1rem;
+}
+
+.chat-export summary {
+  cursor: pointer;
+}
+
+.chat-export button {
+  margin: 0.5rem 0.5rem 0 0;
+}
+
 .empty-state {
   margin: 1rem 0 0;
   color: var(--muted);
@@ -419,6 +432,53 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 `;
 
+const CHAT_JS = `
+document.addEventListener("DOMContentLoaded", () => {
+  const dataElement = document.getElementById("chat-export-data");
+  const details = document.querySelector("[data-chat-export]");
+  if (!dataElement || !details) {
+    return;
+  }
+  const data = JSON.parse(dataElement.textContent);
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const clickDownload = (href, name) => {
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const downloadText = (text, name) => {
+    const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+    clickDownload(url, name);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const exportChat = async (withFiles) => {
+    downloadText(withFiles ? data.markdownWith : data.markdownWithout, data.fileName);
+    if (!withFiles) {
+      return;
+    }
+    for (const file of data.files) {
+      await pause(400);
+      clickDownload(file.href, file.name);
+    }
+  };
+
+  details.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("[data-export]") : null;
+    if (!button) {
+      return;
+    }
+    details.open = false;
+    exportChat(button.getAttribute("data-export") === "with");
+  });
+});
+`;
+
 interface ChatGroup {
   title: string;
   projectId?: string;
@@ -451,6 +511,7 @@ export class StaticArchiveRenderer implements ArchiveRenderer {
     await Promise.all([
       writeTextFile(path.join(this.storage.paths.assetsDir, "site.css"), `${SITE_CSS.trim()}\n`),
       writeTextFile(path.join(this.storage.paths.assetsDir, "site.js"), `${SITE_JS.trim()}\n`),
+      writeTextFile(path.join(this.storage.paths.assetsDir, "chat.js"), `${CHAT_JS.trim()}\n`),
     ]);
   }
 
@@ -532,6 +593,12 @@ export class StaticArchiveRenderer implements ArchiveRenderer {
       attachmentByMessageId.set(attachment.messageId, bucket);
     }
 
+    const downloadedFiles = [...new Map(
+      artifacts.attachments
+        .filter((attachment) => attachment.status === "downloaded")
+        .map((attachment) => [attachment.attachmentId, attachment]),
+    ).values()];
+
     const renderableMessages = buildRenderableMessages(artifacts.messages, attachmentByMessageId, sandboxLinks);
     const messageMarkup = renderableMessages.length === 0
       ? `
@@ -551,6 +618,7 @@ export class StaticArchiveRenderer implements ArchiveRenderer {
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <title>${escapeHtml(artifacts.chat.title)}</title>
           <link rel="stylesheet" href="../../assets/site.css">
+          <script defer src="../../assets/chat.js"></script>
         </head>
         <body>
           <main class="shell">
@@ -560,9 +628,11 @@ export class StaticArchiveRenderer implements ArchiveRenderer {
               ${project ? `<p class="meta">Project: ${escapeHtml(project.projectName)}</p>` : ""}
               <p class="meta">${escapeHtml(artifacts.chat.url)}</p>
               ${projectFiles.length === 0 ? "" : `<section class="chat-files"><h2>Project files</h2>${renderAttachmentList(projectFiles)}</section>`}
+              ${renderExportControls(downloadedFiles)}
             </header>
             <ul class="message-list">${messageMarkup}</ul>
           </main>
+          ${renderExportData(artifacts, downloadedFiles)}
         </body>
       </html>
     `;
@@ -572,6 +642,28 @@ export class StaticArchiveRenderer implements ArchiveRenderer {
       minifyShell(html),
     );
   }
+}
+
+function renderExportControls(downloadedFiles: AttachmentRecord[]): string {
+  const totalBytes = downloadedFiles.reduce((sum, attachment) => sum + (attachment.sizeBytes ?? 0), 0);
+  const withFiles = downloadedFiles.length === 0
+    ? ""
+    : `<button type="button" data-export="with">With files (${downloadedFiles.length} files, ${formatBytes(totalBytes)})</button>`;
+  return `<details class="chat-export" data-chat-export><summary>Download chat</summary><button type="button" data-export="without">Without files</button>${withFiles}</details>`;
+}
+
+function renderExportData(artifacts: StoredChatArtifacts, downloadedFiles: AttachmentRecord[]): string {
+  const data = {
+    fileName: `${toSafeFileName(artifacts.chat.title)}.md`,
+    markdownWithout: buildChatMarkdown(artifacts, "without-files"),
+    ...(downloadedFiles.length > 0 ? { markdownWith: buildChatMarkdown(artifacts, "with-files") } : {}),
+    files: downloadedFiles.map((attachment) => ({ href: localFileHref(attachment), name: attachment.fileName })),
+  };
+  const json = JSON.stringify(data)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+  return `<script type="application/json" id="chat-export-data">${json}</script>`;
 }
 
 function buildRenderableMessages(
@@ -760,7 +852,7 @@ function appendAssistantMessage(
   group.contentBlocks.push(block);
 }
 
-function shouldSkipMessageInRender(message: MessageRecord): boolean {
+export function shouldSkipMessageInRender(message: MessageRecord): boolean {
   if (message.role === "system") {
     return true;
   }
@@ -918,7 +1010,7 @@ function extractReasoningRecap(message: MessageRecord): string | undefined {
   return readString(message.plainText);
 }
 
-function isCommentaryMessage(message: MessageRecord): boolean {
+export function isCommentaryMessage(message: MessageRecord): boolean {
   return message.sourceChannel === "commentary" || message.sourceIsThinkingPreambleMessage === true;
 }
 

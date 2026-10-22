@@ -175,6 +175,15 @@ This allows the archive to distinguish:
 - assistant reasoning recap
 - hidden system messages
 
+## Download chat
+
+Every chat page has a **Download chat** button that saves the conversation as a Markdown file (thoughts, tool calls and hidden messages are left out):
+
+- **Without files** downloads only the `.md` file; attachments are listed by name.
+- **With files** downloads the `.md` file and then every downloaded file of the chat as a separate download, one after another. The browser may ask you to allow multiple downloads.
+
+The files can then be uploaded into a new ChatGPT chat as context.
+
 ## Development
 
 ```powershell
