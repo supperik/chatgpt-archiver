@@ -60,6 +60,50 @@ export function sanitizeFileName(value: string): string {
   return withoutTrailingDots || "unnamed";
 }
 
+const WINDOWS_RESERVED_STEM = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const MAX_FILE_NAME_LENGTH = 120;
+
+export function toSafeFileName(rawName: string | undefined, mimeType?: string): string {
+  const baseName = (rawName ?? "").split(/[/\\]/).pop() ?? "";
+  let name = baseName.trim() ? sanitizeFileName(baseName) : `file${extensionFromMime(mimeType)}`;
+
+  if (WINDOWS_RESERVED_STEM.test(name.split(".")[0] ?? "")) {
+    name = `_${name}`;
+  }
+
+  if (name.length > MAX_FILE_NAME_LENGTH) {
+    const ext = path.extname(name);
+    name = name.slice(0, MAX_FILE_NAME_LENGTH - ext.length) + ext;
+  }
+  return name;
+}
+
+function extensionFromMime(mimeType: string | undefined): string {
+  const subtype = mimeType?.split("/")[1]?.split(/[+;]/)[0]?.trim().toLowerCase() ?? "";
+  return /^[a-z0-9]+$/.test(subtype) ? `.${subtype}` : "";
+}
+
+export function formatBytes(sizeBytes: number): string {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function uniqueFileName(name: string, taken: Set<string>): string {
+  const ext = path.extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  let candidate = name;
+  for (let counter = 2; taken.has(candidate.toLowerCase()); counter += 1) {
+    candidate = `${stem} (${counter})${ext}`;
+  }
+  taken.add(candidate.toLowerCase());
+  return candidate;
+}
+
 export async function listSubdirectories(dirPath: string): Promise<string[]> {
   const entries = await readdir(dirPath, { withFileTypes: true });
   return entries
