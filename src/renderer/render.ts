@@ -9,7 +9,7 @@ import type {
 } from "../contracts";
 import { resolveProjectMetadata } from "../discovery/urlPatterns";
 import { plainTextToHtml, escapeHtml } from "../utils/html";
-import { writeTextFile } from "../utils/fs";
+import { formatBytes, writeTextFile } from "../utils/fs";
 import { ArchiveStorage } from "../storage/archiveStorage";
 
 const SITE_CSS = `
@@ -351,6 +351,16 @@ a {
   padding: 0.9rem 1rem;
 }
 
+.attachment-image img {
+  max-width: 100%;
+  max-height: 24rem;
+  display: block;
+}
+
+.chat-files {
+  margin-top: 1rem;
+}
+
 .empty-state {
   margin: 1rem 0 0;
   color: var(--muted);
@@ -507,8 +517,14 @@ export class StaticArchiveRenderer implements ArchiveRenderer {
   async renderChat(artifacts: StoredChatArtifacts): Promise<void> {
     const project = resolveProjectMetadata(artifacts.chat.url, artifacts.chat);
     const attachmentByMessageId = new Map<string, AttachmentRecord[]>();
+    const projectFiles: AttachmentRecord[] = [];
+    const sandboxLinks = new Map<string, string>();
     for (const attachment of artifacts.attachments) {
+      if (attachment.status === "downloaded" && attachment.sourceUrl?.startsWith("sandbox:")) {
+        sandboxLinks.set(attachment.sourceUrl, localFileHref(attachment));
+      }
       if (!attachment.messageId) {
+        projectFiles.push(attachment);
         continue;
       }
       const bucket = attachmentByMessageId.get(attachment.messageId) ?? [];
@@ -516,7 +532,7 @@ export class StaticArchiveRenderer implements ArchiveRenderer {
       attachmentByMessageId.set(attachment.messageId, bucket);
     }
 
-    const renderableMessages = buildRenderableMessages(artifacts.messages, attachmentByMessageId);
+    const renderableMessages = buildRenderableMessages(artifacts.messages, attachmentByMessageId, sandboxLinks);
     const messageMarkup = renderableMessages.length === 0
       ? `
         <li class="message">
@@ -543,6 +559,7 @@ export class StaticArchiveRenderer implements ArchiveRenderer {
               <h1 class="title">${escapeHtml(artifacts.chat.title)}</h1>
               ${project ? `<p class="meta">Project: ${escapeHtml(project.projectName)}</p>` : ""}
               <p class="meta">${escapeHtml(artifacts.chat.url)}</p>
+              ${projectFiles.length === 0 ? "" : `<section class="chat-files"><h2>Project files</h2>${renderAttachmentList(projectFiles)}</section>`}
             </header>
             <ul class="message-list">${messageMarkup}</ul>
           </main>
@@ -560,17 +577,19 @@ export class StaticArchiveRenderer implements ArchiveRenderer {
 function buildRenderableMessages(
   messages: MessageRecord[],
   attachmentByMessageId: Map<string, AttachmentRecord[]>,
+  sandboxLinks: Map<string, string>,
 ): RenderMessageGroup[] {
   if (messages.some((message) => message.sourceContentType || message.sourceTurnExchangeId || message.sourceChannel != null)) {
-    return buildMetadataAwareRenderableMessages(messages, attachmentByMessageId);
+    return buildMetadataAwareRenderableMessages(messages, attachmentByMessageId, sandboxLinks);
   }
 
-  return buildLegacyRenderableMessages(messages, attachmentByMessageId);
+  return buildLegacyRenderableMessages(messages, attachmentByMessageId, sandboxLinks);
 }
 
 function buildMetadataAwareRenderableMessages(
   messages: MessageRecord[],
   attachmentByMessageId: Map<string, AttachmentRecord[]>,
+  sandboxLinks: Map<string, string>,
 ): RenderMessageGroup[] {
   const groups: RenderMessageGroup[] = [];
   let currentAssistant: RenderMessageGroup | null = null;
@@ -584,10 +603,25 @@ function buildMetadataAwareRenderableMessages(
 
     if (message.role === "user") {
       const group = createRenderMessageGroup("user", message.ordinal);
-      group.contentBlocks.push(createRenderBlock(message));
+      group.contentBlocks.push(createRenderBlock(message, sandboxLinks));
       group.attachments.push(...attachments);
       groups.push(group);
       currentAssistant = null;
+      continue;
+    }
+
+    if (message.role === "tool") {
+      if (attachments.length === 0) {
+        continue;
+      }
+      const toolTurnId = message.sourceTurnExchangeId;
+      if (!currentAssistant || (toolTurnId != null && currentAssistant.sourceTurnExchangeId !== toolTurnId)) {
+        currentAssistant = createRenderMessageGroup("assistant", message.ordinal);
+        currentAssistant.sourceTurnExchangeId = toolTurnId ?? `assistant-${message.ordinal}`;
+        groups.push(currentAssistant);
+      }
+      currentAssistant.endOrdinal = message.ordinal;
+      currentAssistant.attachments.push(...attachments);
       continue;
     }
 
@@ -604,7 +638,7 @@ function buildMetadataAwareRenderableMessages(
 
     currentAssistant.endOrdinal = message.ordinal;
     currentAssistant.attachments.push(...attachments);
-    appendMetadataAwareAssistantMessage(currentAssistant, message);
+    appendMetadataAwareAssistantMessage(currentAssistant, message, sandboxLinks);
   }
 
   return groups.filter((group) => {
@@ -619,6 +653,7 @@ function buildMetadataAwareRenderableMessages(
 function buildLegacyRenderableMessages(
   messages: MessageRecord[],
   attachmentByMessageId: Map<string, AttachmentRecord[]>,
+  sandboxLinks: Map<string, string>,
 ): RenderMessageGroup[] {
   const groups: RenderMessageGroup[] = [];
   let current: RenderMessageGroup | null = null;
@@ -638,12 +673,12 @@ function buildLegacyRenderableMessages(
     current.attachments.push(...attachments);
 
     if (message.role === "assistant") {
-      appendAssistantMessage(current, message);
+      appendAssistantMessage(current, message, sandboxLinks);
       continue;
     }
 
     current.awaitingThoughtResult = false;
-    current.contentBlocks.push(createRenderBlock(message));
+    current.contentBlocks.push(createRenderBlock(message, sandboxLinks));
   }
 
   return groups.filter((group) => {
@@ -668,12 +703,16 @@ function createRenderMessageGroup(role: ChatRole, ordinal: number): RenderMessag
   };
 }
 
-function appendMetadataAwareAssistantMessage(group: RenderMessageGroup, message: MessageRecord): void {
+function appendMetadataAwareAssistantMessage(
+  group: RenderMessageGroup,
+  message: MessageRecord,
+  sandboxLinks: Map<string, string>,
+): void {
   switch (message.sourceContentType) {
     case "model_editable_context":
       return;
     case "thoughts": {
-      const thoughtBlocks = createThoughtRenderBlocks(message);
+      const thoughtBlocks = createThoughtRenderBlocks(message, sandboxLinks);
       group.thoughtBlocks.push(...thoughtBlocks);
       group.awaitingThoughtResult = thoughtBlocks.length > 0;
       return;
@@ -686,7 +725,7 @@ function appendMetadataAwareAssistantMessage(group: RenderMessageGroup, message:
       return;
     }
     default: {
-      const block = createRenderBlock(message);
+      const block = createRenderBlock(message, sandboxLinks);
       if (isCommentaryMessage(message)) {
         group.subtleBlocks.push(block);
       } else {
@@ -697,17 +736,21 @@ function appendMetadataAwareAssistantMessage(group: RenderMessageGroup, message:
   }
 }
 
-function appendAssistantMessage(group: RenderMessageGroup, message: MessageRecord): void {
+function appendAssistantMessage(
+  group: RenderMessageGroup,
+  message: MessageRecord,
+  sandboxLinks: Map<string, string>,
+): void {
   const text = message.plainText.trim();
   if (isSummaryMessage(text)) {
     for (const thoughtBlock of splitThoughtBlocks(text)) {
-      group.thoughtBlocks.push(createRenderBlock(message, thoughtBlock));
+      group.thoughtBlocks.push(createRenderBlock(message, sandboxLinks, thoughtBlock));
     }
     group.awaitingThoughtResult = true;
     return;
   }
 
-  const block = createRenderBlock(message);
+  const block = createRenderBlock(message, sandboxLinks);
   if (group.awaitingThoughtResult) {
     group.subtleBlocks.push(block);
     group.awaitingThoughtResult = false;
@@ -769,8 +812,12 @@ function splitThoughtBlocks(text: string): string[] {
     .filter((part) => part.length > 0);
 }
 
-function createRenderBlock(message: MessageRecord, textOverride?: string): RenderBlock {
-  const renderableText = textOverride ?? buildRenderableText(message);
+function createRenderBlock(
+  message: MessageRecord,
+  sandboxLinks: Map<string, string>,
+  textOverride?: string,
+): RenderBlock {
+  const renderableText = rewriteSandboxLinks(textOverride ?? buildRenderableText(message), sandboxLinks);
   const html = textOverride == null
     ? (message.renderedHtml || plainTextToHtml(renderableText))
     : plainTextToHtml(renderableText);
@@ -779,6 +826,22 @@ function createRenderBlock(message: MessageRecord, textOverride?: string): Rende
     html,
     ...(textOverride == null && message.copiedMarkdown ? { copiedMarkdown: message.copiedMarkdown } : {}),
   };
+}
+
+export function rewriteSandboxLinks(text: string, links: Map<string, string>): string {
+  return text.replace(/sandbox:\/mnt\/data\/[^\s)]+/g, (match) => {
+    let decoded = match;
+    try {
+      decoded = decodeURIComponent(match);
+    } catch {
+      // malformed percent-encoding: match the raw form
+    }
+    return links.get(decoded) ?? match;
+  });
+}
+
+function localFileHref(attachment: AttachmentRecord): string {
+  return `./files/${encodeURIComponent(path.basename(attachment.localPath))}`;
 }
 
 function buildRenderableText(message: MessageRecord): string {
@@ -807,13 +870,13 @@ function wrapAsCodeFence(text: string, language?: string): string {
   return `\`\`\`${language ?? ""}\n${normalized}\n\`\`\``;
 }
 
-function createThoughtRenderBlocks(message: MessageRecord): RenderBlock[] {
+function createThoughtRenderBlocks(message: MessageRecord, sandboxLinks: Map<string, string>): RenderBlock[] {
   const thoughts = isRecord(message.sourceContent) && Array.isArray(message.sourceContent.thoughts)
     ? message.sourceContent.thoughts
     : [];
 
   if (thoughts.length === 0) {
-    return message.plainText.trim().length > 0 ? [createRenderBlock(message)] : [];
+    return message.plainText.trim().length > 0 ? [createRenderBlock(message, sandboxLinks)] : [];
   }
 
   return thoughts.flatMap((thought) => {
@@ -856,23 +919,40 @@ function isCommentaryMessage(message: MessageRecord): boolean {
   return message.sourceChannel === "commentary" || message.sourceIsThinkingPreambleMessage === true;
 }
 
+const UNAVAILABLE_LABELS: Record<Exclude<AttachmentRecord["status"], "downloaded">, string> = {
+  missing: "Unavailable on server",
+  failed: "Download failed",
+  skipped: "Not downloaded (--skip-files)",
+};
+
+function renderAttachmentList(attachments: AttachmentRecord[]): string {
+  return `<ul class="attachment-list">${attachments.map(renderAttachmentCard).join("")}</ul>`;
+}
+
+function renderAttachmentCard(attachment: AttachmentRecord): string {
+  const name = escapeHtml(attachment.fileName);
+  if (attachment.status !== "downloaded") {
+    return `<li class="attachment-card"><strong>${name}</strong><br><span class="meta">${UNAVAILABLE_LABELS[attachment.status]}</span></li>`;
+  }
+
+  const href = localFileHref(attachment);
+  const size = attachment.sizeBytes != null ? formatBytes(attachment.sizeBytes) : undefined;
+  if (attachment.mimeType?.startsWith("image/")) {
+    const meta = [name, size ? escapeHtml(size) : undefined].filter(Boolean).join(" · ");
+    return `<li class="attachment-card attachment-image"><a href="${href}"><img src="${href}" alt="${name}" loading="lazy"></a><span class="meta">${meta}</span></li>`;
+  }
+
+  const meta = [size, attachment.mimeType].filter(Boolean).map((part) => escapeHtml(part as string)).join(" · ");
+  return `<li class="attachment-card"><strong>${name}</strong><br>${meta ? `<span class="meta">${meta}</span><br>` : ""}<a href="${href}">Open local copy</a></li>`;
+}
+
 function renderRenderableMessage(message: RenderMessageGroup): string {
   const attachmentMarkup = message.attachments.length === 0
     ? ""
     : `
       <section class="message-files">
         <h3>Files</h3>
-        <ul class="attachment-list">
-          ${message.attachments
-            .map((attachment) => `
-              <li class="attachment-card">
-                <strong>${escapeHtml(attachment.fileName)}</strong><br>
-                <span class="meta">${escapeHtml(attachment.status)}</span><br>
-                <a href="./files/${encodeURIComponent(path.basename(attachment.localPath))}">Open local copy</a>
-              </li>
-            `)
-            .join("")}
-        </ul>
+        ${renderAttachmentList(message.attachments)}
       </section>
     `;
 
