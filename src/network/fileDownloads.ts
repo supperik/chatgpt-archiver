@@ -18,6 +18,10 @@ export interface FileDownloadSummary {
   skipped: number;
 }
 
+export function resolveDownloadUrl(downloadUrl: string, baseOrigin: string): string {
+  return new URL(downloadUrl, baseOrigin).toString();
+}
+
 export function keyDir(key: string): string {
   return key.startsWith("sandbox:") ? `sandbox-${shortHash(key)}` : key;
 }

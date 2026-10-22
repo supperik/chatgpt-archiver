@@ -1,6 +1,6 @@
 import path from "node:path";
 import { spawn } from "node:child_process";
-import type { AppOptions, BrowserFlavor, BrowserSession } from "../contracts";
+import type { AppOptions, BrowserFlavor, BrowserSession, FileRef } from "../contracts";
 import { createBrowserSession } from "../browser/session";
 import { getProjectNameFromProjectId } from "../discovery/urlPatterns";
 import { ensureDir, writeJsonFile } from "../utils/fs";
@@ -8,11 +8,23 @@ import { Logger } from "../utils/log";
 import {
   CAPTURE_SOURCE_PATHS,
   CHAT_MESSAGES_REQUEST,
+  FILE_DOWNLOAD_REQUEST,
+  INTERPRETER_DOWNLOAD_REQUEST,
   NON_PROJECT_CHATS_REQUEST,
   PROJECT_SIDEBAR_REQUEST,
   REQUIRED_CAPTURE_HEADERS,
 } from "./requestBlueprints";
 import { importFetchedChats } from "./importChatResponses";
+import { extractFileRefs } from "./fileRefs";
+import {
+  curlDownloadToFile,
+  downloadFilesForChat,
+  readFileManifest,
+  resolveDownloadUrl,
+  writeFileManifest,
+  type FileDownloadSummary,
+  type FileTransport,
+} from "./fileDownloads";
 
 export interface FetchOptions extends AppOptions {
   nonProjectLimit: number;
@@ -20,6 +32,7 @@ export interface FetchOptions extends AppOptions {
   projectConversationsLimit: number;
   maxSidebarExpansionRounds: number;
   importAfterFetch: boolean;
+  skipFiles: boolean;
 }
 
 interface CapturedHeaders {
@@ -109,11 +122,32 @@ export async function fetchNetworkArchive(
     logger.info(`Collected ${orderedProjects.length} projects`);
     logger.info(`Collected ${orderedChats.length} total chats`);
 
+    const filesRoot = path.join(options.outDir, "network", "files");
+    const manifest = await readFileManifest(filesRoot);
+    const totals: FileDownloadSummary = { downloaded: 0, cached: 0, failed: 0, missing: 0, skipped: 0 };
+
     for (const chat of orderedChats) {
       const payload = await fetchChatMessages(session, capturedHeaders, chat);
       await writeJsonFile(path.join(chatsDir, `${chat.chatId}.json`), payload);
       logger.info(`Saved chat payload ${chat.chatId}`);
+
+      const summary = await downloadFilesForChat(
+        extractFileRefs(payload, chat.chatId),
+        manifest,
+        filesRoot,
+        createFileTransport(session, capturedHeaders, chat, logger),
+        logger,
+        { skip: options.skipFiles },
+      );
+      for (const name of Object.keys(totals) as (keyof FileDownloadSummary)[]) {
+        totals[name] += summary[name];
+      }
+      await writeFileManifest(filesRoot, manifest);
     }
+
+    logger.info(
+      `Files: ${totals.downloaded} downloaded, ${totals.cached} cached, ${totals.failed} failed, ${totals.missing} missing, ${totals.skipped} skipped`,
+    );
   } finally {
     await session.close();
   }
@@ -145,6 +179,7 @@ export function createDefaultFetchOptions(): FetchOptions {
     projectConversationsLimit: 20,
     maxSidebarExpansionRounds: 5,
     importAfterFetch: false,
+    skipFiles: false,
   };
 }
 
@@ -202,6 +237,9 @@ export function parseFetchArgs(argv: string[]): FetchOptions {
       case "--import":
       case "--render":
         options.importAfterFetch = true;
+        break;
+      case "--skip-files":
+        options.skipFiles = true;
         break;
       default:
         throw new Error(`Unknown argument: ${arg}`);
@@ -437,6 +475,45 @@ async function fetchChatMessages(
     referer: chat.url,
     projectId: chat.projectId,
   }, logger);
+}
+
+function createFileTransport(
+  session: BrowserSession,
+  capturedHeaders: CapturedHeaders,
+  chat: ChatTarget,
+  logger: Logger,
+): FileTransport {
+  const downloadHeaders: CapturedHeaders = {};
+  for (const name of ["cookie", "user-agent"]) {
+    const value = capturedHeaders[name];
+    if (value) {
+      downloadHeaders[name] = value;
+    }
+  }
+
+  return {
+    requestMetadata(ref: FileRef): Promise<unknown> {
+      const request = ref.kind === "sandbox"
+        ? {
+          pathname: INTERPRETER_DOWNLOAD_REQUEST.path(ref.chatId),
+          targetRoute: INTERPRETER_DOWNLOAD_REQUEST.targetRoute,
+          query: INTERPRETER_DOWNLOAD_REQUEST.buildQuery(ref.messageId, ref.sandboxPath ?? ""),
+        }
+        : {
+          pathname: FILE_DOWNLOAD_REQUEST.path(ref.key),
+          targetRoute: FILE_DOWNLOAD_REQUEST.targetRoute,
+          query: FILE_DOWNLOAD_REQUEST.buildQuery(ref.chatId),
+        };
+      return requestJson(session, capturedHeaders, {
+        ...request,
+        referer: chat.url,
+        projectId: chat.projectId,
+      }, logger);
+    },
+    downloadToFile(url: string, destPath: string) {
+      return curlDownloadToFile(resolveDownloadUrl(url, session.baseOrigin), downloadHeaders, destPath);
+    },
+  };
 }
 
 async function requestJson(

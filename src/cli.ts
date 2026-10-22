@@ -172,6 +172,7 @@ Fetch options:
   --max-sidebar-expansion-rounds <n>
                                   Max rounds of project sidebar expansion (default: 5)
   --import                        After fetch, immediately import and render HTML
+  --skip-files                    Do not download chat files
 
 Import options:
   --responses-dir <path>      Directory with raw chat JSON (default: ./archive/network/chats)

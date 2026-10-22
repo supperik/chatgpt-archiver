@@ -15,6 +15,8 @@ The project no longer parses the rendered DOM. The only supported pipeline is:
 - raw discovery responses: `archive/network/discovery/raw`
 - normalized chat targets: `archive/network/discovery/chat-targets.json`
 - raw full chat payloads: `archive/network/chats/<chat-id>.json`
+- files: `archive/network/files/<file-id>/<name>`
+- manifest: `archive/network/files/manifest.json`
 - rendered archive: `archive/index.html` and `archive/chats/<chat-id>/chat.html`
 
 ## Install
@@ -134,6 +136,7 @@ Examples:
 --project-conversations-limit <n>  Initial per-project chats limit
 --max-sidebar-expansion-rounds <n> Maximum rounds of project sidebar expansion
 --import                           Immediately import and render after fetch
+--skip-files                       Do not download chat files
 ```
 
 `run` is equivalent to `fetch --import`.

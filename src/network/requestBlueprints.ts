@@ -46,3 +46,23 @@ export const CHAT_MESSAGES_REQUEST = {
   },
   targetRoute: "/backend-api/conversation/{conversation_id}",
 };
+
+export const FILE_DOWNLOAD_REQUEST = {
+  path(fileId: string): string {
+    return `/backend-api/files/download/${fileId}`;
+  },
+  targetRoute: "/backend-api/files/download/{file_id}",
+  buildQuery(chatId: string): Record<string, string> {
+    return { conversation_id: chatId, inline: "false" };
+  },
+};
+
+export const INTERPRETER_DOWNLOAD_REQUEST = {
+  path(chatId: string): string {
+    return `/backend-api/conversation/${chatId}/interpreter/download`;
+  },
+  targetRoute: "/backend-api/conversation/{conversation_id}/interpreter/download",
+  buildQuery(messageId: string, sandboxPath: string): Record<string, string> {
+    return { message_id: messageId, sandbox_path: sandboxPath };
+  },
+};

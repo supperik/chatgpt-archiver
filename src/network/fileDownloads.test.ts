@@ -11,6 +11,7 @@ import {
   curlDownloadToFile,
   downloadFilesForChat,
   keyDir,
+  resolveDownloadUrl,
   type FileTransport,
 } from "./fileDownloads";
 
@@ -255,4 +256,15 @@ test("curlDownloadToFile leaves no file on 403", async () => {
       assert.deepEqual(await fs.readdir(root), []);
     });
   });
+});
+
+test("resolveDownloadUrl resolves relative paths against the origin and keeps absolute URLs", () => {
+  assert.equal(
+    resolveDownloadUrl("/backend-api/estuary/content?id=1", "https://chatgpt.com"),
+    "https://chatgpt.com/backend-api/estuary/content?id=1",
+  );
+  assert.equal(
+    resolveDownloadUrl("https://files.example.com/a?sig=1", "https://chatgpt.com"),
+    "https://files.example.com/a?sig=1",
+  );
 });

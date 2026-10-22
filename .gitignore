@@ -14,3 +14,5 @@ archive/
 .dolt/
 *.db
 .beads-credential-key
+
+archive-*/
