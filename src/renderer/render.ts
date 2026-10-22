@@ -9,7 +9,7 @@ import type {
 } from "../contracts";
 import { resolveProjectMetadata } from "../discovery/urlPatterns";
 import { plainTextToHtml, escapeHtml } from "../utils/html";
-import { formatBytes, toSafeFileName, writeTextFile } from "../utils/fs";
+import { formatBytes, sanitizeFileName, writeTextFile } from "../utils/fs";
 import { buildChatMarkdown } from "../export/chatMarkdown";
 import { ArchiveStorage } from "../storage/archiveStorage";
 
@@ -454,7 +454,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const downloadText = (text, name) => {
     const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
     clickDownload(url, name);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   };
 
   const exportChat = async (withFiles) => {
@@ -654,7 +654,7 @@ function renderExportControls(downloadedFiles: AttachmentRecord[]): string {
 
 function renderExportData(artifacts: StoredChatArtifacts, downloadedFiles: AttachmentRecord[]): string {
   const data = {
-    fileName: `${toSafeFileName(artifacts.chat.title)}.md`,
+    fileName: `${sanitizeFileName(artifacts.chat.title).slice(0, 120)}.md`,
     markdownWithout: buildChatMarkdown(artifacts, "without-files"),
     ...(downloadedFiles.length > 0 ? { markdownWith: buildChatMarkdown(artifacts, "with-files") } : {}),
     files: downloadedFiles.map((attachment) => ({ href: localFileHref(attachment), name: attachment.fileName })),

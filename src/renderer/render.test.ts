@@ -232,3 +232,9 @@ test("writeAssets writes chat.js", async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+test("export file name keeps the whole title and neutralises separators", async () => {
+  const artifacts = artifactsWithAll([makeMessage({ role: "user", plainText: "hi" })], []);
+  artifacts.chat.title = "TCP/IP </script> basics";
+  const html = await renderChatHtml(artifacts);
+  assert.equal(readExportData(html).fileName, "TCP_IP __script_ basics.md");
+});
