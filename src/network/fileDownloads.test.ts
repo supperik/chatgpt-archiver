@@ -75,6 +75,26 @@ test("downloads an attachment and records it", async () => {
   });
 });
 
+test("records on-disk size, not server-reported size", async () => {
+  await withTempDir(async (root) => {
+    const calls: string[] = [];
+    const base = makeTransport("abc", calls);
+    const transport: FileTransport = {
+      ...base,
+      async requestMetadata(ref) {
+        return { ...(await base.requestMetadata(ref) as object), file_size_bytes: 999 };
+      },
+    };
+    const manifest: FileManifest = {};
+    await downloadFilesForChat([makeRef()], manifest, root, transport, makeLogger(), OPTIONS);
+    assert.equal(manifest.file_1!.sizeBytes, 3);
+
+    const summary = await downloadFilesForChat([makeRef()], manifest, root, transport, makeLogger(), OPTIONS);
+    assert.equal(summary.cached, 1);
+    assert.equal(calls.length, 1);
+  });
+});
+
 test("downloads a shared key once", async () => {
   await withTempDir(async (root) => {
     const manifest: FileManifest = {};

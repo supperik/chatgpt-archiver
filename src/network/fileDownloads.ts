@@ -143,7 +143,7 @@ async function downloadOne(
     entry.status = "downloaded";
     entry.localPath = localPath;
     entry.sha256 = sha256Hex(await readFile(absPath));
-    entry.sizeBytes = typeof json.file_size_bytes === "number" ? json.file_size_bytes : (await stat(absPath)).size;
+    entry.sizeBytes = (await stat(absPath)).size;
     entry.downloadedAt = new Date().toISOString();
     return "downloaded";
   }
