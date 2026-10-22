@@ -179,10 +179,14 @@ This allows the archive to distinguish:
 
 Every chat page has a **Download chat** button that saves the conversation as a Markdown file (thoughts, tool calls and hidden messages are left out):
 
-- **Without files** downloads only the `.md` file; attachments are listed by name.
-- **With files** downloads the `.md` file and then every downloaded file of the chat as a separate download, one after another. The browser may ask you to allow multiple downloads.
+- **Without files** downloads one `.md` file; attachments are listed by name.
+- **With files** shows a command that builds `exports/<name> (<id>).zip` in the archive folder: the chat Markdown plus the chat's files. A browser cannot save local files from a `file://` page, which is why this is a command:
 
-The files can then be uploaded into a new ChatGPT chat as context.
+```bash
+node dist/cli.js export <chatId> [--out-dir ./archive]
+```
+
+The `.md` can be uploaded to a new ChatGPT chat as context on its own. Whether ChatGPT accepts a zip upload depends on your plan.
 
 ## Development
 

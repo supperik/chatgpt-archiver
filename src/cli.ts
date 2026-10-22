@@ -6,7 +6,9 @@ import {
   fetchNetworkArchive,
   parseFetchArgs,
 } from "./network/fetchCurlResponses";
+import { exportChatZip } from "./export/exportChatZip";
 import { importFetchedChats, parseImportArgs } from "./network/importChatResponses";
+import { formatBytes } from "./utils/fs";
 import { Logger } from "./utils/log";
 
 async function main(): Promise<void> {
@@ -35,6 +37,12 @@ async function main(): Promise<void> {
     case "import":
       await importFetchedChats(parseImportArgs(rest));
       return;
+    case "export": {
+      const { chatId, outDir } = parseExportArgs(rest);
+      const result = await exportChatZip(outDir, chatId);
+      console.log(`${result.zipPath}\n${result.fileCount} files, ${formatBytes(result.totalBytes)}`);
+      return;
+    }
   }
 }
 
@@ -47,10 +55,30 @@ function parseCommand(value: string | undefined): CommandName {
     case "import":
     case "run":
     case "launch-browser":
+    case "export":
       return value;
     default:
       throw new Error(`Unknown command: ${value}`);
   }
+}
+
+function parseExportArgs(argv: string[]): { chatId: string; outDir: string } {
+  let chatId: string | undefined;
+  let outDir = path.resolve("archive");
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]!;
+    if (arg === "--out-dir") {
+      outDir = path.resolve(readValue(argv, ++index, arg));
+    } else if (arg.startsWith("--") || chatId) {
+      throw new Error(`Unknown argument for export: ${arg}`);
+    } else {
+      chatId = arg;
+    }
+  }
+  if (!chatId) {
+    throw new Error("Usage: export <chatId> [--out-dir <path>]");
+  }
+  return { chatId, outDir };
 }
 
 function parseLaunchBrowserArgs(argv: string[]): AppOptions {
@@ -146,6 +174,7 @@ Commands:
   fetch          Capture auth headers from an authorized ChatGPT browser and download chat JSON
   import         Build the local archive and HTML from previously fetched chat JSON
   run            Fetch chat JSON and immediately import/render the archive
+  export         Build exports/<chat>.zip with a chat Markdown and its files: export <chatId> [--out-dir <path>]
   launch-browser Launch a Chromium-based browser with remote debugging enabled
   help           Show this help
 

@@ -374,6 +374,12 @@ a {
   margin: 0.5rem 0.5rem 0 0;
 }
 
+.chat-export-command code {
+  display: block;
+  margin-top: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
 .empty-state {
   margin: 1rem 0 0;
   color: var(--muted);
@@ -440,41 +446,56 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
   const data = JSON.parse(dataElement.textContent);
-  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const clickDownload = (href, name) => {
+  const downloadText = (text, name) => {
+    const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
     const link = document.createElement("a");
-    link.href = href;
+    link.href = url;
     link.download = name;
     document.body.appendChild(link);
     link.click();
     link.remove();
-  };
-
-  const downloadText = (text, name) => {
-    const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
-    clickDownload(url, name);
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   };
 
-  const exportChat = async (withFiles) => {
-    downloadText(withFiles ? data.markdownWith : data.markdownWithout, data.fileName);
-    if (!withFiles) {
-      return;
+  const archiveRoot = () => {
+    let root = decodeURIComponent(location.pathname).replace(/\\/chats\\/[^/]+\\/chat\\.html$/, "");
+    if (/^\\/[A-Za-z]:/.test(root)) {
+      root = root.slice(1).replace(/\\//g, "\\\\");
     }
-    for (const file of data.files) {
-      await pause(400);
-      clickDownload(file.href, file.name);
+    return root;
+  };
+
+  const panel = details.querySelector("[data-export-command]");
+  const commandText = details.querySelector("[data-export-command-text]");
+  const copyButton = details.querySelector("[data-export-copy]");
+
+  const toggleCommand = () => {
+    commandText.textContent = 'node dist/cli.js export ' + data.chatId + ' --out-dir "' + archiveRoot() + '"';
+    panel.hidden = !panel.hidden;
+  };
+
+  const copyCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(commandText.textContent);
+    } catch (error) {
+      getSelection().selectAllChildren(commandText);
     }
+    copyButton.textContent = "Copied";
+    setTimeout(() => { copyButton.textContent = "Copy command"; }, 1500);
   };
 
   details.addEventListener("click", (event) => {
-    const button = event.target instanceof Element ? event.target.closest("[data-export]") : null;
-    if (!button) {
-      return;
+    const target = event.target instanceof Element ? event.target : null;
+    const button = target ? target.closest("[data-export]") : null;
+    if (button && button.getAttribute("data-export") === "with") {
+      toggleCommand();
+    } else if (button) {
+      details.open = false;
+      downloadText(data.markdownWithout, data.fileName);
+    } else if (target && target.closest("[data-export-copy]")) {
+      copyCommand();
     }
-    details.open = false;
-    exportChat(button.getAttribute("data-export") === "with");
   });
 });
 `;
@@ -649,15 +670,20 @@ function renderExportControls(downloadedFiles: AttachmentRecord[]): string {
   const withFiles = downloadedFiles.length === 0
     ? ""
     : `<button type="button" data-export="with">With files (${downloadedFiles.length} files, ${formatBytes(totalBytes)})</button>`;
-  return `<details class="chat-export" data-chat-export><summary>Download chat</summary><button type="button" data-export="without">Without files</button>${withFiles}</details>`;
+  const panel = downloadedFiles.length === 0
+    ? ""
+    : `<div class="chat-export-command" data-export-command hidden><p>Run in the chatgpt-archiver folder, the zip appears in the archive's exports folder:</p><code data-export-command-text></code><button type="button" data-export-copy>Copy command</button></div>`;
+  return `<details class="chat-export" data-chat-export><summary>Download chat</summary><button type="button" data-export="without">Without files</button>${withFiles}${panel}</details>`;
 }
 
 function renderExportData(artifacts: StoredChatArtifacts, downloadedFiles: AttachmentRecord[]): string {
   const data = {
     fileName: `${sanitizeFileName(artifacts.chat.title).slice(0, 120)}.md`,
     markdownWithout: buildChatMarkdown(artifacts, "without-files"),
-    ...(downloadedFiles.length > 0 ? { markdownWith: buildChatMarkdown(artifacts, "with-files") } : {}),
-    files: downloadedFiles.map((attachment) => ({ href: localFileHref(attachment), name: attachment.fileName })),
+    chatId: artifacts.chat.chatId,
+    ...(downloadedFiles.length > 0
+      ? { fileCount: downloadedFiles.length, totalBytes: downloadedFiles.reduce((sum, attachment) => sum + (attachment.sizeBytes ?? 0), 0) }
+      : {}),
   };
   const json = JSON.stringify(data)
     .replace(/</g, "\\u003c")

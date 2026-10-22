@@ -172,4 +172,4 @@ export interface ArchiveRenderer {
   renderChat(artifacts: StoredChatArtifacts): Promise<void>;
 }
 
-export type CommandName = "help" | "fetch" | "import" | "run" | "launch-browser";
+export type CommandName = "help" | "fetch" | "import" | "run" | "launch-browser" | "export";
