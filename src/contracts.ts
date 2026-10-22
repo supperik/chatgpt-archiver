@@ -46,6 +46,21 @@ export interface MessageAttachmentRef {
   caption?: string;
 }
 
+export type FileRefKind = "attachment" | "image" | "sandbox";
+
+export interface FileRef {
+  key: string;
+  kind: FileRefKind;
+  chatId: string;
+  messageId: string;
+  role: ChatRole;
+  fileName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  sandboxPath?: string;
+  generated?: boolean;
+}
+
 export interface MessageRecord {
   messageId: string;
   chatId: string;
