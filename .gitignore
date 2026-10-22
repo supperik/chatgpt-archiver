@@ -9,3 +9,8 @@ dist/
 archive/
 .tmp-tests/
 .tmp-archive/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

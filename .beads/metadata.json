@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "chatgpt_archiver",
+  "project_id": "1b37155d-e53f-411d-a0b0-26ed1afc3719"
+}
