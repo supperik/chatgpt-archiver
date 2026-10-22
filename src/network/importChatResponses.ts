@@ -1,7 +1,10 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
-import type { ArchiveManifest, ChatIndexEntry, MessageRecord, StoredChatArtifacts } from "../contracts";
+import type { ArchiveManifest, ChatIndexEntry, FileManifest, MessageRecord, StoredChatArtifacts } from "../contracts";
 import { getChatIdFromUrl, getProjectNameFromProjectId, resolveProjectMetadata } from "../discovery/urlPatterns";
+import { buildChatFileLinks, copyChatFiles, type ChatFileLinks } from "./importChatFiles";
+import { readFileManifest } from "./fileDownloads";
+import { extractFileRefs } from "./fileRefs";
 import { StaticArchiveRenderer } from "../renderer/render";
 import { ArchiveStorage } from "../storage/archiveStorage";
 import { readJsonFile, readJsonFileIfExists } from "../utils/fs";
@@ -11,6 +14,7 @@ export interface ImportOptions {
   baseUrl: string;
   outDir: string;
   responsesDir: string;
+  filesDir: string;
   targetsFile: string;
 }
 
@@ -24,6 +28,7 @@ interface ChatTarget {
 
 interface NormalizedNode {
   id: string;
+  fileRefId: string;
   parentId?: string;
   childIds: string[];
   role: MessageRecord["role"];
@@ -58,6 +63,7 @@ export function createDefaultImportOptions(): ImportOptions {
     baseUrl: "https://chatgpt.com",
     outDir,
     responsesDir: path.join(outDir, "network", "chats"),
+    filesDir: path.join(outDir, "network", "files"),
     targetsFile: path.join(outDir, "network", "discovery", "chat-targets.json"),
   };
 }
@@ -87,12 +93,22 @@ export async function importFetchedChats(overrides: Partial<ImportOptions> = {})
     throw new Error(`No JSON responses found in ${options.responsesDir}`);
   }
 
+  const manifest = await readFileManifest(options.filesDir);
   let importedCount = 0;
 
   for (const filePath of files) {
     const payload = await readJsonFile<unknown>(filePath);
     const fileChatId = path.basename(filePath, path.extname(filePath));
-    const artifacts = convertResponseToArtifacts(payload, fileChatId, targets, options.baseUrl);
+    const artifacts = convertResponseToArtifacts(payload, fileChatId, targets, options.baseUrl, manifest);
+    const missingPaths = new Set(
+      await copyChatFiles(artifacts.copies, options.filesDir, storage.getChatDir(artifacts.chat.chatId)),
+    );
+    for (const attachment of artifacts.attachments) {
+      if (missingPaths.has(attachment.localPath)) {
+        attachment.status = "missing";
+        attachment.error = "local file missing";
+      }
+    }
 
     await storage.writeChatArtifacts(artifacts);
     await renderer.renderChat(artifacts);
@@ -106,7 +122,7 @@ export async function importFetchedChats(overrides: Partial<ImportOptions> = {})
       archived: true,
       status: "done",
       messageCount: artifacts.messages.length,
-      attachmentCount: 0,
+      attachmentCount: artifacts.attachments.length,
       ...(project ?? {}),
     };
 
@@ -134,6 +150,7 @@ export function parseImportArgs(argv: string[]): ImportOptions {
       case "--out-dir":
         options.outDir = path.resolve(readValue(argv, ++index, arg));
         options.responsesDir = path.join(options.outDir, "network", "chats");
+        options.filesDir = path.join(options.outDir, "network", "files");
         options.targetsFile = path.join(options.outDir, "network", "discovery", "chat-targets.json");
         break;
       case "--responses-dir":
@@ -173,12 +190,13 @@ async function loadTargets(targetsFile: string): Promise<Map<string, ChatTarget>
   return new Map((raw ?? []).map((entry) => [entry.chatId, entry]));
 }
 
-function convertResponseToArtifacts(
+export function convertResponseToArtifacts(
   payload: unknown,
   fileChatId: string,
   targets: Map<string, ChatTarget>,
   baseUrl: string,
-): StoredChatArtifacts {
+  manifest: FileManifest,
+): StoredChatArtifacts & { copies: ChatFileLinks["copies"] } {
   const chatId = resolveChatId(payload, fileChatId);
   const target = targets.get(chatId);
   const responseTitle = pickMetadataString(payload, "title", "conversation_title");
@@ -190,7 +208,11 @@ function convertResponseToArtifacts(
     ?? buildChatUrl(baseUrl, chatId, projectId);
   const title = chooseBetterTitle(responseTitle ?? target?.title ?? `Chat ${chatId}`, `Chat ${chatId}`);
 
-  const nodes = normalizeNodes(extractMessageNodes(payload));
+  const links = buildChatFileLinks(chatId, extractFileRefs(payload, chatId), manifest);
+  const nodes = normalizeNodes(extractMessageNodes(payload)).map((node) => ({
+    ...node,
+    keep: node.keep || (node.role !== "system" && links.refsByMessageId.has(node.fileRefId)),
+  }));
   const messages = orderNodes(nodes).map((node, ordinal) => ({
     messageId: node.id || shortHash(`${chatId}|${ordinal}|${node.text}`),
     chatId,
@@ -199,7 +221,7 @@ function convertResponseToArtifacts(
     createdAt: node.createdAt,
     plainText: node.text,
     preferredSource: "network" as const,
-    attachmentRefs: [],
+    attachmentRefs: links.refsByMessageId.get(node.fileRefId) ?? [],
     ...(node.contentType ? { sourceContentType: node.contentType } : {}),
     sourceChannel: node.channel ?? null,
     ...(node.status ? { sourceStatus: node.status } : {}),
@@ -229,7 +251,8 @@ function convertResponseToArtifacts(
       ...(projectName ? { projectName } : {}),
     },
     messages,
-    attachments: [],
+    attachments: links.attachments,
+    copies: links.copies,
   };
 }
 
@@ -367,6 +390,7 @@ function normalizeNode(rawNode: unknown, sequence: number): NormalizedNode | nul
 
   return {
     id,
+    fileRefId: firstString(message.id, rawNode.id) ?? id,
     parentId,
     childIds,
     role,
