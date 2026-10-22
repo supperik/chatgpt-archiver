@@ -841,7 +841,8 @@ export function rewriteSandboxLinks(text: string, links: Map<string, string>): s
 }
 
 function localFileHref(attachment: AttachmentRecord): string {
-  return `./files/${encodeURIComponent(path.basename(attachment.localPath))}`;
+  const encoded = encodeURIComponent(path.basename(attachment.localPath)).replace(/\(/g, "%28").replace(/\)/g, "%29");
+  return `./files/${encoded}`;
 }
 
 function buildRenderableText(message: MessageRecord): string {

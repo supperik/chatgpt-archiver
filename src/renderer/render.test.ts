@@ -151,6 +151,14 @@ test("rewrites downloaded sandbox links", async () => {
   assert.match(html, /href="\.\/files\/x\.zip"/);
 });
 
+test("rewrites sandbox links to files with parentheses", async () => {
+  const html = await renderChatHtml(artifactsWithAll(
+    [makeMessage({ plainText: "[zip](sandbox:/mnt/data/x.zip)" })],
+    [makeAttachment({ messageId: "m1", fileName: "x (2).zip", localPath: "files/x (2).zip", sourceUrl: "sandbox:/mnt/data/x.zip" })]
+  ));
+  assert.match(html, /href="\.\/files\/x%20%282%29\.zip"/);
+});
+
 test("escapes attachment file names", async () => {
   const html = await renderChatHtml(artifactsWithAll(
     [makeMessage({ role: "user", plainText: "hi" })],
