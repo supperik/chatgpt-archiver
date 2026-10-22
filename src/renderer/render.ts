@@ -770,14 +770,41 @@ function splitThoughtBlocks(text: string): string[] {
 }
 
 function createRenderBlock(message: MessageRecord, textOverride?: string): RenderBlock {
+  const renderableText = textOverride ?? buildRenderableText(message);
   const html = textOverride == null
-    ? (message.renderedHtml || plainTextToHtml(message.plainText))
-    : plainTextToHtml(textOverride);
+    ? (message.renderedHtml || plainTextToHtml(renderableText))
+    : plainTextToHtml(renderableText);
 
   return {
     html,
     ...(textOverride == null && message.copiedMarkdown ? { copiedMarkdown: message.copiedMarkdown } : {}),
   };
+}
+
+function buildRenderableText(message: MessageRecord): string {
+  if (message.sourceContentType === "code") {
+    return wrapAsCodeFence(message.plainText, readCodeLanguage(message));
+  }
+
+  return message.plainText;
+}
+
+function readCodeLanguage(message: MessageRecord): string | undefined {
+  const language = message.sourceContent?.language;
+  return typeof language === "string" && language && language !== "unknown" ? language : undefined;
+}
+
+function wrapAsCodeFence(text: string, language?: string): string {
+  const normalized = text.replace(/\r\n?/g, "\n").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  if (/^\s*(```|~~~)/.test(normalized)) {
+    return normalized;
+  }
+
+  return `\`\`\`${language ?? ""}\n${normalized}\n\`\`\``;
 }
 
 function createThoughtRenderBlocks(message: MessageRecord): RenderBlock[] {
